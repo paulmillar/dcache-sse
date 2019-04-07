@@ -26,7 +26,7 @@ args = parser.parse_args()
 
 user = vars(args).get("user")
 pw = vars(args).get("password")
-r = vars(args).get("recursive")
+isRecursive = vars(args).get("recursive") == 'recursive'
 if not pw:
     pw = getpass.getpass("Please enter dCache password for user " + user + ": ")
 
@@ -88,6 +88,8 @@ def message(type, sub, event):
             path = watches[sub] + '/' + event['name']
         else:
             path = watches[sub]
+            if path != base_path and isRecursive:
+                return
 
         isDir = False
         for flag in mask:
@@ -97,7 +99,7 @@ def message(type, sub, event):
             else:
                 action = flag
 
-        if action == 'IN_CREATE' and isDir and vars(args).get("recursive") == 'recursive':
+        if action == 'IN_CREATE' and isDir and isRecursive:
             path = watches[sub] + '/' + event['name']
             watch(path)
 
@@ -137,13 +139,13 @@ def message(type, sub, event):
 mvCookie = {}
 watches = {}
 
-path = vars(args).get("inotify")
+base_path = vars(args).get("inotify")
 
-if path:
-    if vars(args).get("recursive") == 'recursive':
-        recursive_watch(path)
+if base_path:
+    if isRecursive:
+        recursive_watch(base_path)
     else:
-        watch(path)
+        watch(base_path)
 
 messages = SSEClient(channel, session=s)
 
