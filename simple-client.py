@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """test application to demonstrate dCache inotify"""
 from sseclient import SSEClient
 import requests
@@ -17,6 +17,10 @@ parser.add_argument('--password', default=None,
                     help="The dCache password.  Defaults to prompting the user.")
 parser.add_argument('--inotify', default=None, metavar="PATH",
                     help="Subscribe to events on PATH.")
+parser.add_argument('--trust', choices=['path', 'builtin', 'any'],
+                    help="Which certificates to trust.", default='builtin')
+parser.add_argument('--trust-path', metavar="PATH", default='/etc/grid-security/certificates',
+                    help="Trust anchor location if --trust is 'path'.")
 args = parser.parse_args()
 
 user = vars(args).get("user")
@@ -27,11 +31,13 @@ if not pw:
 s = requests.Session()
 s.auth = (user,pw)
 
-## FIXME -- here we (in effect) disable all security from TLS.
-##          This should be fixed by allowing the user to specify
-##          an alternative trust-store
-s.verify = False
-urllib3.disable_warnings()
+trust = vars(args).get("trust")
+if trust == 'any':
+    print("Disabling certificate verification: connection is insecure!")
+    s.verify = False
+    urllib3.disable_warnings()
+elif trust == 'path':
+    s.verify = vars(args).get("trust-path")
 
 response = s.post(vars(args).get("endpoint") + '/channels')
 channel = response.headers['Location']
@@ -39,22 +45,46 @@ channel = response.headers['Location']
 print("Channel is %s" % channel)
 
 def message(type, sub, event):
-    print("    event: %s" % type)
-    print("    subscription: %s" % sub)
-    print("    event: %s" % event)
+    if type == 'inotify':
+        mask = event['mask']
+
+        if 'name' in event:
+            path = watches[sub] + '/' + event['name']
+        else:
+            path = watches[sub]
+
+        for flag in mask:
+            if flag == 'IN_ISDIR':
+                path = path + '/'
+            else:
+                action = flag
+        print("%s %s" % (action.ljust(17), path))
+
+    else:
+        print("Unknown event: %s", type)
+        print("    Subscription: %s", sub)
+        print("    Data: %s", event)
+
+
+watches = {}
 
 path = vars(args).get("inotify")
 if path:
     r = s.post(format(channel) + "/subscriptions/inotify", json={"path" : path})
     watch = r.headers['Location']
-    print("Watch on %s is %s" % (path, watch))
-
+    print("Watching %s" % path)
+    watches[watch] = path
 
 messages = SSEClient(channel, session=s)
-for msg in messages:
-    print("Event %s:" % msg.id)
-    eventType = msg.event
-    data = json.loads(msg.data)
-    sub = data["subscription"]
-    event = data["event"]
-    message(eventType, sub, event)
+
+try:
+    for msg in messages:
+        eventType = msg.event
+        data = json.loads(msg.data)
+        sub = data["subscription"]
+        event = data["event"]
+        message(eventType, sub, event)
+
+except KeyboardInterrupt:
+    print("Deleting channel")
+    s.delete(channel)
