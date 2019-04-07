@@ -44,6 +44,7 @@ channel = response.headers['Location']
 
 print("Channel is %s" % channel)
 
+
 def message(type, sub, event):
     if type == 'inotify':
         mask = event['mask']
@@ -58,7 +59,33 @@ def message(type, sub, event):
                 path = path + '/'
             else:
                 action = flag
-        print("%s %s" % (action.ljust(17), path))
+
+        if action == 'IN_MOVED_FROM':
+            mvFrom = path
+            cookie = event['cookie']
+            if cookie in mvCookie:
+                mvTo = mvCookie[cookie]
+                del mvCookie[cookie]
+            else:
+                mvCookie[cookie] = path
+        else:
+            mvFrom = None
+
+        if action == 'IN_MOVED_TO':
+            mvTo = path
+            cookie = event['cookie']
+            if cookie in mvCookie:
+                mvFrom = mvCookie[cookie]
+                del mvCookie[cookie]
+            else:
+                mvCookie[cookie] = path
+        else:
+            mvTo = None
+
+        if mvFrom and mvTo:
+            print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
+        else:
+            print("%s %s %s" % (action.ljust(17), path, event))
 
     else:
         print("Unknown event: %s", type)
@@ -66,6 +93,7 @@ def message(type, sub, event):
         print("    Data: %s", event)
 
 
+mvCookie = {}
 watches = {}
 
 path = vars(args).get("inotify")
