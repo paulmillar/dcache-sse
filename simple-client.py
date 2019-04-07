@@ -41,9 +41,23 @@ elif trust == 'path':
 
 response = s.post(vars(args).get("endpoint") + '/channels')
 channel = response.headers['Location']
+eventCount = 0
 
-print("Channel is %s" % channel)
+def moveEvent(mvFrom, mvTo):
+    print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
 
+def nonMoveEvent(action, path):
+    print("%s %s" % (action.ljust(17), path))
+
+def checkMoveEvents():
+    pop_list = []
+    for cookie, (path, action, removeAt) in mvCookie.items():
+        if removeAt <= eventCount:
+            pop_list.append(cookie)
+
+    for c in pop_list:
+        (path,action,_) = mvCookie.pop(c)
+        nonMoveEvent(action, path)
 
 def message(type, sub, event):
     if type == 'inotify':
@@ -60,32 +74,33 @@ def message(type, sub, event):
             else:
                 action = flag
 
+        # FIXME If we get a MOVED_FROM or MOVED_TO then we don't know
+        # straight away if that was from the target moving into or out
+        # of our watched area, or if there will be a corresponding
+        # event in the near future.
+
         if action == 'IN_MOVED_FROM':
             mvFrom = path
             cookie = event['cookie']
             if cookie in mvCookie:
-                mvTo = mvCookie[cookie]
+                (mvTo, _, _) = mvCookie[cookie]
                 del mvCookie[cookie]
+                moveEvent(mvFrom, mvTo)
             else:
-                mvCookie[cookie] = path
-        else:
-            mvFrom = None
+                mvCookie[cookie] = (path,action, eventCount+5)
 
-        if action == 'IN_MOVED_TO':
+        elif action == 'IN_MOVED_TO':
             mvTo = path
             cookie = event['cookie']
             if cookie in mvCookie:
-                mvFrom = mvCookie[cookie]
+                (mvFrom, _, _) = mvCookie[cookie]
                 del mvCookie[cookie]
+                moveEvent(mvFrom, mvTo)
             else:
-                mvCookie[cookie] = path
+                mvCookie[cookie] = (path, action, eventCount+5)
         else:
-            mvTo = None
-
-        if mvFrom and mvTo:
-            print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
-        else:
-            print("%s %s %s" % (action.ljust(17), path, event))
+            checkMoveEvents()
+            nonMoveEvent(action, path)
 
     else:
         print("Unknown event: %s", type)
@@ -107,6 +122,7 @@ messages = SSEClient(channel, session=s)
 
 try:
     for msg in messages:
+        eventCount = eventCount + 1
         eventType = msg.event
         data = json.loads(msg.data)
         sub = data["subscription"]
