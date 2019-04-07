@@ -9,10 +9,11 @@ import json
 
 parser = argparse.ArgumentParser(description='Sample dCache SSE consumer')
 parser.add_argument('--endpoint',
-                    default="https://prometheus.desy.de:3880/api/v1/events",
-                    help="The events endpoint.  This should be a URL like 'https://frontend.example.org:3880/api/v1/events'.")
+                    default="https://prometheus.desy.de:3880/api/v1",
+                    help="The events endpoint.  This should be a URL like 'https://frontend.example.org:3880/api/v1'.")
 parser.add_argument('--user', metavar="NAME", default=getpass.getuser(),
                     help="The dCache username.  Defaults to the current user's name.")
+parser.add_argument('--recursive', '-r', action='store_const', const='recursive', default='single')
 parser.add_argument('--password', default=None,
                     help="The dCache password.  Defaults to prompting the user.")
 parser.add_argument('--inotify', default=None, metavar="PATH",
@@ -25,6 +26,7 @@ args = parser.parse_args()
 
 user = vars(args).get("user")
 pw = vars(args).get("password")
+r = vars(args).get("recursive")
 if not pw:
     pw = getpass.getpass("Please enter dCache password for user " + user + ": ")
 
@@ -39,9 +41,28 @@ if trust == 'any':
 elif trust == 'path':
     s.verify = vars(args).get("trust-path")
 
-response = s.post(vars(args).get("endpoint") + '/channels')
+response = s.post(vars(args).get("endpoint") + '/events/channels')
 channel = response.headers['Location']
+
 eventCount = 0
+
+def watch(path):
+    w = s.post(format(channel) + "/subscriptions/inotify", json={"path" : path})
+    watch = w.headers['Location']
+    print("Watching %s" % path)
+    watches[watch] = path
+
+def recursive_watch(path):
+    watch(path)
+
+    r = s.get(vars(args).get("endpoint") + "/namespace" + path + "?children=true")
+    dir_list = r.json()
+    children = dir_list["children"]
+    for item in children:
+        if item["fileType"] == "DIR":
+            recursive_watch(path + "/" + item["fileName"])
+
+
 
 def moveEvent(mvFrom, mvTo):
     print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
@@ -68,16 +89,21 @@ def message(type, sub, event):
         else:
             path = watches[sub]
 
+        isDir = False
         for flag in mask:
             if flag == 'IN_ISDIR':
+                isDir = True
                 path = path + '/'
             else:
                 action = flag
 
-        # FIXME If we get a MOVED_FROM or MOVED_TO then we don't know
-        # straight away if that was from the target moving into or out
-        # of our watched area, or if there will be a corresponding
-        # event in the near future.
+        if action == 'IN_CREATE' and isDir and vars(args).get("recursive") == 'recursive':
+            path = watches[sub] + '/' + event['name']
+            watch(path)
+
+        if action == 'IN_IGNORED' and isDir:
+            path = watches[sub] + '/' + event['name']
+            watches.pop(path)
 
         if action == 'IN_MOVED_FROM':
             mvFrom = path
@@ -112,11 +138,12 @@ mvCookie = {}
 watches = {}
 
 path = vars(args).get("inotify")
+
 if path:
-    r = s.post(format(channel) + "/subscriptions/inotify", json={"path" : path})
-    watch = r.headers['Location']
-    print("Watching %s" % path)
-    watches[watch] = path
+    if vars(args).get("recursive") == 'recursive':
+        recursive_watch(path)
+    else:
+        watch(path)
 
 messages = SSEClient(channel, session=s)
 
@@ -125,9 +152,12 @@ try:
         eventCount = eventCount + 1
         eventType = msg.event
         data = json.loads(msg.data)
-        sub = data["subscription"]
-        event = data["event"]
-        message(eventType, sub, event)
+        if eventType == "SYSTEM":
+            print("SYSTEM: %s" % msg.data)
+        else:
+            sub = data["subscription"]
+            event = data["event"]
+            message(eventType, sub, event)
 
 except KeyboardInterrupt:
     print("Deleting channel")
