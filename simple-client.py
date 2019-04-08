@@ -68,8 +68,11 @@ def recursive_watch(path):
 def moveEvent(mvFrom, mvTo):
     print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
 
-def nonMoveEvent(action, path):
-    print("%s %s" % (action.ljust(17), path))
+def newFileEvent(path):
+    print("New file %s" %path)
+    
+def rmFileEvent(path):
+    print("File deleted %s" % path)
 
 def checkMoveEvents():
     pop_list = []
@@ -79,63 +82,65 @@ def checkMoveEvents():
 
     for c in pop_list:
         (path,action,_) = mvCookie.pop(c)
-        nonMoveEvent(action, path)
-
-def message(type, sub, event):
-    if type == 'inotify':
-        mask = event['mask']
-
-        if 'name' in event:
-            path = watches[sub] + '/' + event['name']
+        if action == 'IN_MOVE_FROM':
+            rmFileEvent(path)
         else:
-            path = watches[sub]
-            if path != base_path and isRecursive:
-                return
+            newFileEvent(path)
 
-        isDir = False
-        for flag in mask:
-            if flag == 'IN_ISDIR':
-                isDir = True
-            else:
-                action = flag
+def inotify(type, sub, event):
+    mask = event['mask']
 
-        if action == 'IN_CREATE' and isDir and isRecursive:
-            watch(path)
-
-        if action == 'IN_IGNORED' and isDir:
-            watches.pop(path)
-
-        if isDir:
-            path = path + '/'
-
-        if action == 'IN_MOVED_FROM':
-            mvFrom = path
-            cookie = event['cookie']
-            if cookie in mvCookie:
-                (mvTo, _, _) = mvCookie[cookie]
-                del mvCookie[cookie]
-                moveEvent(mvFrom, mvTo)
-            else:
-                mvCookie[cookie] = (path,action, eventCount+5)
-
-        elif action == 'IN_MOVED_TO':
-            mvTo = path
-            cookie = event['cookie']
-            if cookie in mvCookie:
-                (mvFrom, _, _) = mvCookie[cookie]
-                del mvCookie[cookie]
-                moveEvent(mvFrom, mvTo)
-            else:
-                mvCookie[cookie] = (path, action, eventCount+5)
-        else:
-            checkMoveEvents()
-            nonMoveEvent(action, path)
-
+    if 'name' in event:
+        path = watches[sub] + '/' + event['name']
     else:
-        print("Unknown event: %s", type)
-        print("    Subscription: %s", sub)
-        print("    Data: %s", event)
+        path = watches[sub]
+        if path != base_path and isRecursive:
+            return
 
+    isDir = False
+    for flag in mask:
+        if flag == 'IN_ISDIR':
+            isDir = True
+        else:
+            action = flag
+
+    if action == 'IN_CREATE' and isDir and isRecursive:
+        watch(path)
+
+    if action == 'IN_IGNORED' and isDir:
+        watches.pop(path)
+
+    if isDir:
+        path = path + '/'
+
+    if action == 'IN_MOVED_FROM':
+        mvFrom = path
+        cookie = event['cookie']
+        if cookie in mvCookie:
+            (mvTo, _, _) = mvCookie[cookie]
+            del mvCookie[cookie]
+            moveEvent(mvFrom, mvTo)
+        else:
+            mvCookie[cookie] = (path,action, eventCount+5)
+
+    elif action == 'IN_MOVED_TO':
+        mvTo = path
+        cookie = event['cookie']
+        if cookie in mvCookie:
+            (mvFrom, _, _) = mvCookie[cookie]
+            del mvCookie[cookie]
+            moveEvent(mvFrom, mvTo)
+        else:
+            mvCookie[cookie] = (path, action, eventCount+5)
+    else:
+        checkMoveEvents()
+        if not isDir:
+            if action == 'IN_CLOSE_WRITE':
+                newFileEvent(path)
+            elif action == 'IN_DELETE':
+                rmFileEvent(path)
+            elif action != 'IN_CREATE':
+                print("Suppressing %s %s" % (action, path))
 
 mvCookie = {}
 watches = {}
@@ -156,11 +161,18 @@ try:
         eventType = msg.event
         data = json.loads(msg.data)
         if eventType == "SYSTEM":
-            print("SYSTEM: %s" % msg.data)
+            type = data["type"]
+            if type != "NEW_SUBSCRIPTION" and type != "SUBSCRIPTION_CLOSED":
+                print("SYSTEM: %s" % msg.data)
         else:
             sub = data["subscription"]
             event = data["event"]
-            message(eventType, sub, event)
+            if eventType == 'inotify':
+                inotify(eventType, sub, event)
+            else:
+                print("Unknown event: %s", type)
+                print("    Subscription: %s", sub)
+                print("    Data: %s", event)
 
 except KeyboardInterrupt:
     print("Deleting channel")
