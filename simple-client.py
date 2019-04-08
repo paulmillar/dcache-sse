@@ -95,17 +95,17 @@ def message(type, sub, event):
         for flag in mask:
             if flag == 'IN_ISDIR':
                 isDir = True
-                path = path + '/'
             else:
                 action = flag
 
         if action == 'IN_CREATE' and isDir and isRecursive:
-            path = watches[sub] + '/' + event['name']
             watch(path)
 
         if action == 'IN_IGNORED' and isDir:
-            path = watches[sub] + '/' + event['name']
             watches.pop(path)
+
+        if isDir:
+            path = path + '/'
 
         if action == 'IN_MOVED_FROM':
             mvFrom = path
