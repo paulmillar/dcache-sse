@@ -47,7 +47,10 @@ channel = response.headers['Location']
 eventCount = 0
 
 def watch(path):
-    w = s.post(format(channel) + "/subscriptions/inotify", json={"path" : path})
+    w = s.post(format(channel) + "/subscriptions/inotify",
+               json={"path": path, "flags": ["IN_CLOSE_WRITE", "IN_CREATE",
+                                             "IN_DELETE", "IN_DELETE_SELF",
+                                             "IN_MOVE_SELF", "IN_MOVE"]})
     watch = w.headers['Location']
     print("Watching %s" % path)
     watches[watch] = path
@@ -61,8 +64,6 @@ def recursive_watch(path):
     for item in children:
         if item["fileType"] == "DIR":
             recursive_watch(path + "/" + item["fileName"])
-
-
 
 def moveEvent(mvFrom, mvTo):
     print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
