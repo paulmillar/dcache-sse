@@ -11,6 +11,8 @@ parser = argparse.ArgumentParser(description='Sample dCache SSE consumer')
 parser.add_argument('--endpoint',
                     default="https://prometheus.desy.de:3880/api/v1",
                     help="The events endpoint.  This should be a URL like 'https://frontend.example.org:3880/api/v1'.")
+parser.add_argument('--auth', metavar="METHOD", choices=['userpw', 'x509'], default="userpw",
+                    help="How to authenticate.")
 parser.add_argument('--user', metavar="NAME", default=getpass.getuser(),
                     help="The dCache username.  Defaults to the current user's name.")
 parser.add_argument('--recursive', '-r', action='store_const', const='recursive', default='single')
@@ -24,14 +26,18 @@ parser.add_argument('--trust-path', metavar="PATH", default='/etc/grid-security/
                     help="Trust anchor location if --trust is 'path'.")
 args = parser.parse_args()
 
+auth = vars(args).get("auth")
 user = vars(args).get("user")
 pw = vars(args).get("password")
 isRecursive = vars(args).get("recursive") == 'recursive'
-if not pw:
+if auth == 'userpw' and not pw:
     pw = getpass.getpass("Please enter dCache password for user " + user + ": ")
 
 s = requests.Session()
-s.auth = (user,pw)
+if auth == 'userpw':
+    s.auth = (user,pw)
+else:
+    s.cert = '/tmp/x509up_u1000'
 
 trust = vars(args).get("trust")
 if trust == 'any':
