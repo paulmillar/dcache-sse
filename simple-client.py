@@ -18,12 +18,12 @@ parser.add_argument('--user', metavar="NAME", default=getpass.getuser(),
 parser.add_argument('--recursive', '-r', action='store_const', const='recursive', default='single')
 parser.add_argument('--password', default=None,
                     help="The dCache password.  Defaults to prompting the user.")
-parser.add_argument('--inotify', default=None, metavar="PATH",
-                    help="Subscribe to events on PATH.")
 parser.add_argument('--trust', choices=['path', 'builtin', 'any'],
                     help="Which certificates to trust.", default='builtin')
 parser.add_argument('--trust-path', metavar="PATH", default='/etc/grid-security/certificates',
                     help="Trust anchor location if --trust is 'path'.")
+parser.add_argument('paths', metavar='PATH', nargs='+',
+                    help='The paths to watch.')
 args = parser.parse_args()
 
 auth = vars(args).get("auth")
@@ -100,7 +100,7 @@ def inotify(type, sub, event):
         path = watches[sub] + '/' + event['name']
     else:
         path = watches[sub]
-        if path != base_path and isRecursive:
+        if path in paths and isRecursive:
             return
 
     isDir = False
@@ -151,13 +151,38 @@ def inotify(type, sub, event):
 mvCookie = {}
 watches = {}
 
-base_path = vars(args).get("inotify")
+def normalise_path(path):
+    return path if path == "/" or not path.endswith("/") else path[:-1]
 
-if base_path:
-    if isRecursive:
-        recursive_watch(base_path)
-    else:
-        watch(base_path)
+def remove_redundant_paths(paths):
+    "Removing any paths that are redundant"
+    watches = []
+    for raw_path in paths:
+        path = normalise_path(raw_path)
+        remove_watches = []
+        for watch in watches:
+            if path.startswith(watch + "/"):
+                print("Skipping redundant path: %s" % path)
+                break
+            elif watch.startswith(path + "/"):
+                print("Skipping redundant path: %s" % watch)
+                remove_watches.append(watch)
+        else:
+            watches.append(path)
+        for watch in remove_watches:
+            watches.remove(watch)
+    return watches
+
+base_paths = vars(args).get("paths")
+
+if isRecursive:
+    paths = remove_redundant_paths(base_paths)
+    for path in paths:
+        recursive_watch(path)
+else:
+    paths = map(normalise_path, base_paths)
+    for path in paths:
+        watch(path)
 
 messages = SSEClient(channel, session=s)
 
