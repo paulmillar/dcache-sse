@@ -6,6 +6,7 @@ import urllib3
 import getpass
 import argparse
 import json
+import activities
 
 parser = argparse.ArgumentParser(description='Sample dCache SSE consumer')
 parser.add_argument('--endpoint',
@@ -53,6 +54,7 @@ def request_channel():
     return response.headers['Location']
 
 eventCount = 0
+activity = activities.PrintActivity()
 
 def watch(path):
     "Add a watch and update watches list if successful"
@@ -116,15 +118,6 @@ def recursive_watch(path):
 
 
 
-def moveEvent(mvFrom, mvTo):
-    print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
-
-def newFileEvent(path):
-    print("New file %s" %path)
-
-def rmFileEvent(path):
-    print("File deleted %s" % path)
-
 def checkMoveEvents():
     pop_list = []
     for cookie, (path, action, removeAt) in mvCookie.items():
@@ -134,9 +127,9 @@ def checkMoveEvents():
     for c in pop_list:
         (path,action,_) = mvCookie.pop(c)
         if action == 'IN_MOVE_FROM':
-            rmFileEvent(path)
+            activity.onDeletedFile(path)
         else:
-            newFileEvent(path)
+            activity.onNewFile(path)
 
 def inotify(type, sub, event):
     mask = event['mask']
@@ -161,16 +154,16 @@ def inotify(type, sub, event):
     if action == 'IN_IGNORED' and isDir:
         watches.pop(path)
 
-    if isDir:
-        path = path + '/'
-
     if action == 'IN_MOVED_FROM':
         mvFrom = path
         cookie = event['cookie']
         if cookie in mvCookie:
             (mvTo, _, _) = mvCookie[cookie]
             del mvCookie[cookie]
-            moveEvent(mvFrom, mvTo)
+            if isDir:
+                activity.onMovedDirectory(mvFrom, mvTo)
+            else:
+                activity.onMovedFile(mvFrom, mvTo)
         else:
             mvCookie[cookie] = (path,action, eventCount+5)
 
@@ -180,17 +173,31 @@ def inotify(type, sub, event):
         if cookie in mvCookie:
             (mvFrom, _, _) = mvCookie[cookie]
             del mvCookie[cookie]
-            moveEvent(mvFrom, mvTo)
+            if isDir:
+                activity.onMovedDirectory(mvFrom, mvTo)
+            else:
+                activity.onMovedFile(mvFrom, mvTo)
         else:
             mvCookie[cookie] = (path, action, eventCount+5)
     else:
         checkMoveEvents()
-        if not isDir:
-            if action == 'IN_CLOSE_WRITE':
-                newFileEvent(path)
+        if isDir:
+            if action == 'IN_CREATE':
+                activity.onNewDirectory(path)
             elif action == 'IN_DELETE':
-                rmFileEvent(path)
-            elif action != 'IN_CREATE':
+                activity.onDeletedDirectory(path)
+            elif action == 'IN_IGNORED' or action == 'IN_DELETE_SELF' or action == 'IN_MOVE_SELF':
+                pass
+            else:
+                print("Suppressing ISDIR %s %s" % (action, path))
+        else:
+            if action == 'IN_CLOSE_WRITE':
+                activity.onNewFile(path)
+            elif action == 'IN_DELETE':
+                activity.onDeletedFile(path)
+            elif action == 'IN_IGNORED' or action == 'IN_DELETE_SELF' or action == 'IN_CREATE':
+                pass
+            else:
                 print("Suppressing %s %s" % (action, path))
 
 mvCookie = {}
