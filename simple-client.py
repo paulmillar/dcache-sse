@@ -25,6 +25,9 @@ parser.add_argument('--trust-path', metavar="PATH", default='/etc/grid-security/
                     help="Trust anchor location if --trust is 'path'.")
 parser.add_argument('paths', metavar='PATH', nargs='+',
                     help='The paths to watch.')
+parser.add_argument('--activity', metavar="ACTIVITY", choices=['print', 'unarchive'], default="print",
+                    help='What to do with the inotify events.')
+parser.add_argument('--target-path', metavar="PATH", default=None, help="The path for unarchive activity");
 args = parser.parse_args()
 
 auth = vars(args).get("auth")
@@ -54,7 +57,17 @@ def request_channel():
     return response.headers['Location']
 
 eventCount = 0
-activity = activities.PrintActivity()
+activity_name = vars(args).get("activity")
+
+if activity_name == 'print':
+    activity = activities.PrintActivity()
+elif activity_name == 'unarchive':
+    target = vars(args).get("target_path")
+    if not target:
+        raise Exception('Missing --target-path argument')
+    activity = activities.UnarchiveActivity(target)
+else:
+    raise Exception('Unknown activity: ' + activity)
 
 def watch(path):
     "Add a watch and update watches list if successful"

@@ -3,7 +3,7 @@ class BaseActivity:
 
     def onNewFile(self, path):
         pass
-    
+
     def onDeletedFile(self, path):
         pass
 
@@ -19,11 +19,11 @@ class BaseActivity:
     def onMovedDirectory(self, fromPath, toPath):
         pass
 
-    
+
 class PrintActivity(BaseActivity):
     def onNewFile(self, path):
         print("NEW FILE %s" % path)
-    
+
     def onDeletedFile(self, path):
         print("DELETED FILE %s" % path)
 
@@ -38,3 +38,19 @@ class PrintActivity(BaseActivity):
 
     def onMovedDirectory(self, fromPath, toPath):
         print("DIRECTORY MOVED FROM %s/ TO %s/" % (fromPath, toPath))
+
+
+class UnarchiveActivity(BaseActivity):
+    """Extract newly uploaded files to a target directory"""
+
+    def __init__(self, targetPath):
+        print("Extracting archives into %s" % targetPath)
+        self.__targetPath = targetPath
+
+    def onNewFile(self, path):
+        if path.endswith(".zip"):
+            print("Extracting files from zip archive: %s" % path)
+            self.extract(path)
+
+    def extract(self, path):
+        pass # TODO implement unzip functionality
