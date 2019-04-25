@@ -47,36 +47,81 @@ if trust == 'any':
 elif trust == 'path':
     s.verify = vars(args).get("trust-path")
 
-response = s.post(vars(args).get("endpoint") + '/events/channels')
-channel = response.headers['Location']
+def request_channel():
+    response = s.post(vars(args).get("endpoint") + '/events/channels')
+    response.raise_for_status()
+    return response.headers['Location']
 
 eventCount = 0
 
 def watch(path):
+    "Add a watch and update watches list if successful"
     w = s.post(format(channel) + "/subscriptions/inotify",
                json={"path": path, "flags": ["IN_CLOSE_WRITE", "IN_CREATE",
                                              "IN_DELETE", "IN_DELETE_SELF",
                                              "IN_MOVE_SELF", "IN_MOVE"]})
+    w.raise_for_status()
     watch = w.headers['Location']
     print("Watching %s" % path)
     watches[watch] = path
 
-def recursive_watch(path):
-    watch(path)
+def single_watch(path):
+    "Watch a single path (i.e., non-recursive)"
+    try:
+        watch(path)
+    except requests.exceptions.HTTPError as e:
+        if w.status_code == 400:
+            print("Watch for path %s request failed: %s" % (path, w.json()["errors"][0]["message"]))
+        else:
+            print("Server rejected watch for path %s: %s" % (path, str(e)))
 
-    r = s.get(vars(args).get("endpoint") + "/namespace" + path + "?children=true")
-    dir_list = r.json()
-    children = dir_list["children"]
-    for item in children:
-        if item["fileType"] == "DIR":
-            recursive_watch(path + "/" + item["fileName"])
+    except requests.exceptions.RequestException as e:
+        print("Failed to watch path %s: %s" % (path, str(e)))
+
+
+def watch_subdirectories(path):
+    try:
+        r = s.get(vars(args).get("endpoint") + "/namespace" + path + "?children=true")
+        r.raise_for_status()
+        dir_list = r.json()
+        children = dir_list["children"]
+
+        for item in children:
+            if item["fileType"] == "DIR":
+                recursive_watch(path + "/" + item["fileName"])
+
+    except requests.exceptions.HTTPError as e:
+        if w.status_code == 400:
+            print("Directory listing for path %s failed: %s" % (path, w.json()["errors"][0]["message"]))
+        else:
+            print("Server rejected directory listing for path %s: %s" % (path, str(e)))
+
+    except requests.exceptions.RequestException as e:
+        print("Failed to list directory %s: %s" % (path, str(e)))
+
+
+def recursive_watch(path):
+    try:
+        watch(path)
+        watch_subdirectories(path)
+
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 400:
+            print("Watch for path %s request failed: %s" % (path, e.response.json()["errors"][0]["message"]))
+        else:
+            print("Server rejected watch for path %s: %s" % (path, str(e)))
+
+    except requests.exceptions.RequestException as e:
+        print("Failed to watch path %s: %s" % (path, str(e)))
+
+
 
 def moveEvent(mvFrom, mvTo):
     print("MOVE FROM %s TO %s" % (mvFrom, mvTo))
 
 def newFileEvent(path):
     print("New file %s" %path)
-    
+
 def rmFileEvent(path):
     print("File deleted %s" % path)
 
@@ -111,7 +156,7 @@ def inotify(type, sub, event):
             action = flag
 
     if action == 'IN_CREATE' and isDir and isRecursive:
-        watch(path)
+        single_watch(path)
 
     if action == 'IN_IGNORED' and isDir:
         watches.pop(path)
@@ -173,20 +218,24 @@ def remove_redundant_paths(paths):
             watches.remove(watch)
     return watches
 
-base_paths = vars(args).get("paths")
-
-if isRecursive:
-    paths = remove_redundant_paths(base_paths)
-    for path in paths:
-        recursive_watch(path)
-else:
-    paths = map(normalise_path, base_paths)
-    for path in paths:
-        watch(path)
-
-messages = SSEClient(channel, session=s)
+channel = request_channel()
 
 try:
+    base_paths = vars(args).get("paths")
+    if isRecursive:
+        paths = remove_redundant_paths(base_paths)
+        for path in paths:
+            recursive_watch(path)
+    else:
+        paths = map(normalise_path, base_paths)
+        for path in paths:
+            single_watch(path)
+
+    if not watches:
+        exit("No watches established, exiting...")
+
+    messages = SSEClient(channel, session=s)
+
     for msg in messages:
         eventCount = eventCount + 1
         eventType = msg.event
@@ -206,5 +255,8 @@ try:
                 print("    Data: %s", event)
 
 except KeyboardInterrupt:
+    print("Interrupting...")
+
+finally:
     print("Deleting channel")
     s.delete(channel)
