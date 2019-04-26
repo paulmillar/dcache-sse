@@ -19,10 +19,11 @@ parser.add_argument('--user', metavar="NAME", default=getpass.getuser(),
 parser.add_argument('--recursive', '-r', action='store_const', const='recursive', default='single')
 parser.add_argument('--password', default=None,
                     help="The dCache password.  Defaults to prompting the user.")
-parser.add_argument('--trust', choices=['path', 'builtin', 'any'],
-                    help="Which certificates to trust.", default='builtin')
-parser.add_argument('--trust-path', metavar="PATH", default='/etc/grid-security/certificates',
-                    help="Trust anchor location if --trust is 'path'.")
+parser.add_argument('--x509-trust', choices=['path', 'builtin', 'any'],
+                    help="Which certificate authorities to trust when checking a server certificate.",
+                    default='builtin')
+parser.add_argument('--x509-trust-path', metavar="PATH", default='/etc/grid-security/certificates',
+                    help="Trust anchor location if --x509-trust is 'path'.")
 parser.add_argument('paths', metavar='PATH', nargs='+',
                     help='The paths to watch.')
 parser.add_argument('--activity', metavar="ACTIVITY", choices=['print', 'unarchive'], default="print",
@@ -43,13 +44,13 @@ if auth == 'userpw':
 else:
     s.cert = '/tmp/x509up_u1000'
 
-trust = vars(args).get("trust")
+trust = vars(args).get("x509-trust")
 if trust == 'any':
     print("Disabling certificate verification: connection is insecure!")
     s.verify = False
     urllib3.disable_warnings()
 elif trust == 'path':
-    s.verify = vars(args).get("trust-path")
+    s.verify = vars(args).get("x509-trust-path")
 
 def request_channel():
     response = s.post(vars(args).get("endpoint") + '/events/channels')
