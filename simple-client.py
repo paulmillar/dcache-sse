@@ -38,22 +38,24 @@ isRecursive = vars(args).get("recursive") == 'recursive'
 if auth == 'userpw' and not pw:
     pw = getpass.getpass("Please enter dCache password for user " + user + ": ")
 
-s = requests.Session()
-if auth == 'userpw':
-    s.auth = (user,pw)
-else:
-    s.cert = '/tmp/x509up_u1000'
+def configure_session():
+    s = requests.Session()
+    if auth == 'userpw':
+        s.auth = (user,pw)
+    else:
+        s.cert = '/tmp/x509up_u1000' # REVISIT support X509_PROXY environment var, and discover uid.
 
-trust = vars(args).get("x509-trust")
-if trust == 'any':
-    print("Disabling certificate verification: connection is insecure!")
-    s.verify = False
-    urllib3.disable_warnings()
-elif trust == 'path':
-    s.verify = vars(args).get("x509-trust-path")
+    trust = vars(args).get("x509-trust")
+    if trust == 'any':
+        print("Disabling certificate verification: connection is insecure!")
+        s.verify = False
+        urllib3.disable_warnings()
+    elif trust == 'path':
+        s.verify = vars(args).get("x509-trust-path")
+    return s
 
-def request_channel():
-    response = s.post(vars(args).get("endpoint") + '/events/channels')
+def request_channel(session):
+    response = session.post(vars(args).get("endpoint") + '/events/channels')
     response.raise_for_status()
     return response.headers['Location']
 
@@ -66,7 +68,7 @@ elif activity_name == 'unarchive':
     target = vars(args).get("target_path")
     if not target:
         raise Exception('Missing --target-path argument')
-    activity = activities.UnarchiveActivity(target)
+    activity = activities.UnarchiveActivity(target, configure_session=configure_session)
 else:
     raise Exception('Unknown activity: ' + activity)
 
@@ -239,7 +241,8 @@ def remove_redundant_paths(paths):
             watches.remove(watch)
     return watches
 
-channel = request_channel()
+s = configure_session()
+channel = request_channel(s)
 
 try:
     base_paths = vars(args).get("paths")

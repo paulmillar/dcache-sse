@@ -54,11 +54,12 @@ class PrintActivity(BaseActivity):
 class UnarchiveActivity(BaseActivity):
     """Extract newly uploaded files to a target directory"""
 
-    def __init__(self, targetPath):
+    def __init__(self, targetPath, configure_session):
         print("Extracting archives into %s" % targetPath)
         ## REVISIT discover webdav door URL
         self.__target_url = urljoin('https://prometheus.desy.de/', targetPath + '/');
         self.__threads = []
+        self.__configure_session = configure_session
 
     def onNewFile(self, path):
         if path.endswith(".zip"):
@@ -69,30 +70,33 @@ class UnarchiveActivity(BaseActivity):
 
     def extract(self, path):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            local_archive = os.path.join(tmpdirname, 'archive.zip')
+            with self.__configure_session() as s:
 
-            # REVISIT discover the webdav door URL
-            url = urljoin('http://prometheus.desy.de/', path)
-            print("Downloading %s into %s" % (url, local_archive))
-            r = requests.get(url, allow_redirects=True)
-            open(local_archive, 'wb').write(r.content)
+                local_archive = os.path.join(tmpdirname, 'archive.zip')
 
-            target_dir = os.path.join(tmpdirname, 'contents')
-            with zipfile.ZipFile(local_archive, "r") as zip_ref:
-                zip_ref.extractall(target_dir)
+                # REVISIT discover the webdav door URL
+                url = urljoin('https://prometheus.desy.de/', path)
+                print("Downloading %s into %s" % (url, local_archive))
+                r = s.get(url, allow_redirects=True)
+                open(local_archive, 'wb').write(r.content)
 
-            basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
-            target = urljoin(self.__target_url, os.path.splitext(basename)[0] + '/');
+                target_dir = os.path.join(tmpdirname, 'contents')
+                with zipfile.ZipFile(local_archive, "r") as zip_ref:
+                    zip_ref.extractall(target_dir)
 
-            print("basename=%s, target=%s" % (basename, target))
+                basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
+                target = urljoin(self.__target_url, os.path.splitext(basename)[0] + '/');
 
-            for r, d, f in os.walk(target_dir):
-                for file in f:
-                    abs_path = os.path.join(r, file)
-                    upload_url = urljoin(target, file)
+                print("basename=%s, target=%s" % (basename, target))
 
-                    print("    UPLOADING %s to %s" % (abs_path, upload_url))
-                    # upload files into dCache
+                for r, d, f in os.walk(target_dir):
+                    for file in f:
+                        abs_path = os.path.join(r, file)
+                        upload_url = urljoin(target, file)
+
+                        print("    UPLOADING %s to %s" % (abs_path, upload_url))
+                        with open(abs_path, 'rb') as data:
+                            s.put(upload_url, data=data)
 
     def close(self):
         print("Waiting for background tasks to finish")
