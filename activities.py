@@ -1,3 +1,11 @@
+from threading import Thread
+from urllib.parse import urljoin
+import tempfile
+import os
+import requests
+import time
+import zipfile
+
 class BaseActivity:
     """The base class that does nothing when presented with events"""
 
@@ -48,12 +56,45 @@ class UnarchiveActivity(BaseActivity):
 
     def __init__(self, targetPath):
         print("Extracting archives into %s" % targetPath)
-        self.__targetPath = targetPath
+        ## REVISIT discover webdav door URL
+        self.__target_url = urljoin('https://prometheus.desy.de/', targetPath + '/');
+        self.__threads = []
 
     def onNewFile(self, path):
         if path.endswith(".zip"):
             print("Extracting files from zip archive: %s" % path)
-            self.extract(path)
+            thread = Thread(target = self.extract, args = (path,))
+            thread.start()
+            self.__threads.append(thread)
 
     def extract(self, path):
-        pass # TODO implement unzip functionality
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            local_archive = os.path.join(tmpdirname, 'archive.zip')
+
+            # REVISIT discover the webdav door URL
+            url = urljoin('http://prometheus.desy.de/', path)
+            print("Downloading %s into %s" % (url, local_archive))
+            r = requests.get(url, allow_redirects=True)
+            open(local_archive, 'wb').write(r.content)
+
+            target_dir = os.path.join(tmpdirname, 'contents')
+            with zipfile.ZipFile(local_archive, "r") as zip_ref:
+                zip_ref.extractall(target_dir)
+
+            basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
+            target = urljoin(self.__target_url, os.path.splitext(basename)[0] + '/');
+
+            print("basename=%s, target=%s" % (basename, target))
+
+            for r, d, f in os.walk(target_dir):
+                for file in f:
+                    abs_path = os.path.join(r, file)
+                    upload_url = urljoin(target, file)
+
+                    print("    UPLOADING %s to %s" % (abs_path, upload_url))
+                    # upload files into dCache
+
+    def close(self):
+        print("Waiting for background tasks to finish")
+        for thread in self.__threads:
+            thread.join()
