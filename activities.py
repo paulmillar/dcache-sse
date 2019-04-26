@@ -19,6 +19,9 @@ class BaseActivity:
     def onMovedDirectory(self, fromPath, toPath):
         pass
 
+    def close(self):
+        pass
+
 
 class PrintActivity(BaseActivity):
     def onNewFile(self, path):

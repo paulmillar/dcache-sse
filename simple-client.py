@@ -280,3 +280,4 @@ except KeyboardInterrupt:
 finally:
     print("Deleting channel")
     s.delete(channel)
+    activity.close()
