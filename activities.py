@@ -30,6 +30,90 @@ class BaseActivity:
     def close(self):
         pass
 
+class HttpBasedActivity(BaseActivity):
+    """Any activity that makes use of Requests library."""
+    def __init__(self, *args, **kwargs):
+        if kwargs is None:
+            raise Exception('Missing kwargs in HttpBasedActivity')
+        
+        self.__session_factory = kwargs.get('session_factory')
+        if self.__session_factory is None:
+            raise Exception('Missing session_factory in HttpBasedActivity')
+        
+        self.__session = None
+        
+    def session(self):
+        if self.__session is None:
+            self.__session = self.__session_factory()
+        return self.__session
+
+    def close(self):
+        if self.__session is not None:
+            self.__session.close()
+            self.__session = None
+
+            
+class FrontendBasedActivity(HttpBasedActivity):
+    """Any activity that makes use of dCache REST API."""
+    def __init__(self, *args, **kwargs):
+        super(FrontendBasedActivity, self).__init__(*args, **kwargs)
+
+        if kwargs is None:
+            raise Exception('Missing kwargs in FrontendBasedActivity')
+
+        self.__api_uri = kwargs.get('api_url')
+                
+        if self.__api_uri is None:
+            raise Exception('Missing api_uri argument')
+
+    def rest_url(self, path):
+        return self.__api_uri + '/' + path ## REVISIT: use URL combining to resolve
+
+    def close(self):
+        super(FrontendBasedActivity, self).close()
+
+    
+class TransferringActivity(FrontendBasedActivity):
+    """Any activity that transfers data between the client and dCache."""
+    def __init__(self, *args, **kwargs):
+        super(TransferringActivity, self).__init__(*args, **kwargs)
+        self.__doors = None
+
+    def __discoverDoors(self):
+        r = self.session().get(self.rest_url("doors"))
+        r.raise_for_status()
+        return r.json()
+
+    def __load(self, door_info):
+        return door_info['load']
+
+    def doors(self, protocol, tags):
+        """Return the URL of a door with this protocol"""
+        ## REVISIT: cached value expires after some time?
+        if not self.__doors:
+            self.__doors = self.__discoverDoors()
+
+        selected_doors = []
+        for door in self.__doors:
+            if door['protocol'] != protocol:
+                continue
+            if not tags or all(elem in door['tags'] for elem in tags):
+                selected_doors.append(door)
+
+        if not selected_doors:
+            raise Exception('No doors match protocol=' + protocol + ', tags=' + str(tags))
+
+        selected_doors.sort(key = self.__load)
+        best_door = selected_doors[0]
+
+        addresses = set(best_door['addresses'])
+        address = addresses.pop() # What if there are multiple interfaces?
+        return "%s://%s:%d/" % (protocol, address, best_door['port'])
+        
+        
+    def close(self):
+        super(TransferringActivity, self).close()
+
 
 class PrintActivity(BaseActivity):
     def onNewFile(self, path):
@@ -51,15 +135,17 @@ class PrintActivity(BaseActivity):
         print("DIRECTORY MOVED FROM %s/ TO %s/" % (fromPath, toPath))
 
 
-class UnarchiveActivity(BaseActivity):
+class UnarchiveActivity(TransferringActivity):
     """Extract newly uploaded files to a target directory"""
 
-    def __init__(self, targetPath, configure_session):
+    def __init__(self, *args, **kwargs):
+        super(UnarchiveActivity, self).__init__(*args, **kwargs)
+        targetPath = args[0]
         print("Extracting archives into %s" % targetPath)
-        ## REVISIT discover webdav door URL
-        self.__target_url = urljoin('https://prometheus.desy.de/', targetPath + '/');
         self.__threads = []
-        self.__configure_session = configure_session
+        webdav_url = self.doors('https', ['dcache-view'])
+        self.__download_url = webdav_url
+        self.__target_url = urljoin(webdav_url, targetPath + '/');
 
     def onNewFile(self, path):
         if path.endswith(".zip"):
@@ -70,35 +156,35 @@ class UnarchiveActivity(BaseActivity):
 
     def extract(self, path):
         with tempfile.TemporaryDirectory() as tmpdirname:
-            with self.__configure_session() as s:
+            local_archive = os.path.join(tmpdirname, 'archive.zip')
 
-                local_archive = os.path.join(tmpdirname, 'archive.zip')
+            url = urljoin(self.__download_url, path)
+            print("Downloading %s into %s" % (url, local_archive))
+            r = self.session().get(url, allow_redirects=True)
+            open(local_archive, 'wb').write(r.content)
 
-                # REVISIT discover the webdav door URL
-                url = urljoin('https://prometheus.desy.de/', path)
-                print("Downloading %s into %s" % (url, local_archive))
-                r = s.get(url, allow_redirects=True)
-                open(local_archive, 'wb').write(r.content)
+            target_dir = os.path.join(tmpdirname, 'contents')
+            with zipfile.ZipFile(local_archive, "r") as zip_ref:
+                zip_ref.extractall(target_dir)
 
-                target_dir = os.path.join(tmpdirname, 'contents')
-                with zipfile.ZipFile(local_archive, "r") as zip_ref:
-                    zip_ref.extractall(target_dir)
+            basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
+            target = urljoin(self.__target_url, os.path.splitext(basename)[0] + '/');
 
-                basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
-                target = urljoin(self.__target_url, os.path.splitext(basename)[0] + '/');
+            for r, d, f in os.walk(target_dir):
+                for file in f:
+                    abs_path = os.path.join(r, file)
+                    upload_url = urljoin(target, file)
 
-                print("basename=%s, target=%s" % (basename, target))
-
-                for r, d, f in os.walk(target_dir):
-                    for file in f:
-                        abs_path = os.path.join(r, file)
-                        upload_url = urljoin(target, file)
-
-                        print("    UPLOADING %s to %s" % (abs_path, upload_url))
-                        with open(abs_path, 'rb') as data:
-                            s.put(upload_url, data=data)
+                    print("    UPLOADING %s to %s" % (abs_path, upload_url))
+                    with open(abs_path, 'rb') as data:
+                        self.session().put(upload_url, data=data)
 
     def close(self):
-        print("Waiting for background tasks to finish")
+        isFirst = True
         for thread in self.__threads:
-            thread.join()
+            if thread.isAlive():
+                if isFirst:
+                    print("Waiting for background tasks to finish")
+                    isFirst = False
+                thread.join()
+        super(UnarchiveActivity, self).close()

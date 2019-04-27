@@ -68,7 +68,7 @@ elif activity_name == 'unarchive':
     target = vars(args).get("target_path")
     if not target:
         raise Exception('Missing --target-path argument')
-    activity = activities.UnarchiveActivity(target, configure_session=configure_session)
+    activity = activities.UnarchiveActivity(target, session_factory=configure_session, api_url=vars(args).get("endpoint"))
 else:
     raise Exception('Unknown activity: ' + activity)
 
