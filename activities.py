@@ -154,18 +154,17 @@ class UnarchiveActivity(TransferringActivity):
         self.__extensions = [e for f in shutil.get_unpack_formats() for e in f[1]]
 
     def onNewFile(self, path):
-        extension = os.path.splitext(path)[1]
+        for extension in self.__extensions:
+            if path.endswith(extension):
+                print("Extracting files from archive: %s (%s)" % (path,extension))
+                thread = Thread(target = self.extract, args = (path,extension))
+                thread.start()
+                self.__threads.append(thread)
+                break
 
-        if extension in self.__extensions:
-            print("Extracting files from archive: %s" % path)
-            thread = Thread(target = self.extract, args = (path,))
-            thread.start()
-            self.__threads.append(thread)
 
-
-    def extract(self, path):
-        basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
-        (name,extension) = os.path.splitext(basename)
+    def extract(self, path, extension):
+        name = os.path.basename(path)[:-len(extension)] # REVISIT: shouldn't this be OS indepndent?
         localname = 'archive' + extension
         upload_base_url = urljoin(self.__target_url, name + '/');
 
