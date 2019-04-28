@@ -183,7 +183,8 @@ class UnarchiveActivity(TransferringActivity):
             for r, d, f in os.walk(target_dir):
                 for file in f:
                     abs_path = os.path.join(r, file)
-                    upload_url = urljoin(upload_base_url, file)
+                    rel_path = os.path.relpath(abs_path, target_dir)
+                    upload_url = urljoin(upload_base_url, rel_path)
 
                     print("    UPLOADING %s to %s" % (abs_path, upload_url))
                     with open(abs_path, 'rb') as data:
