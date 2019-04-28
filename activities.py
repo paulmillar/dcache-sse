@@ -5,6 +5,7 @@ import os
 import requests
 import time
 import zipfile
+import shutil
 
 class BaseActivity:
     """The base class that does nothing when presented with events"""
@@ -35,16 +36,20 @@ class HttpBasedActivity(BaseActivity):
     def __init__(self, *args, **kwargs):
         if kwargs is None:
             raise Exception('Missing kwargs in HttpBasedActivity')
-        
+
         self.__session_factory = kwargs.get('session_factory')
         if self.__session_factory is None:
             raise Exception('Missing session_factory in HttpBasedActivity')
-        
+
+        self.__args = kwargs.get('args')
+        if self.__args is None:
+            raise Exception('Missing args in HttpBasedActivity')
+
         self.__session = None
-        
+
     def session(self):
         if self.__session is None:
-            self.__session = self.__session_factory()
+            self.__session = self.__session_factory(self.__args)
         return self.__session
 
     def close(self):
@@ -52,7 +57,7 @@ class HttpBasedActivity(BaseActivity):
             self.__session.close()
             self.__session = None
 
-            
+
 class FrontendBasedActivity(HttpBasedActivity):
     """Any activity that makes use of dCache REST API."""
     def __init__(self, *args, **kwargs):
@@ -62,7 +67,7 @@ class FrontendBasedActivity(HttpBasedActivity):
             raise Exception('Missing kwargs in FrontendBasedActivity')
 
         self.__api_uri = kwargs.get('api_url')
-                
+
         if self.__api_uri is None:
             raise Exception('Missing api_uri argument')
 
@@ -72,7 +77,7 @@ class FrontendBasedActivity(HttpBasedActivity):
     def close(self):
         super(FrontendBasedActivity, self).close()
 
-    
+
 class TransferringActivity(FrontendBasedActivity):
     """Any activity that transfers data between the client and dCache."""
     def __init__(self, *args, **kwargs):
@@ -109,8 +114,8 @@ class TransferringActivity(FrontendBasedActivity):
         addresses = set(best_door['addresses'])
         address = addresses.pop() # What if there are multiple interfaces?
         return "%s://%s:%d/" % (protocol, address, best_door['port'])
-        
-        
+
+
     def close(self):
         super(TransferringActivity, self).close()
 
@@ -145,18 +150,27 @@ class UnarchiveActivity(TransferringActivity):
         self.__threads = []
         webdav_url = self.doors('https', ['dcache-view'])
         self.__download_url = webdav_url
-        self.__target_url = urljoin(webdav_url, targetPath + '/');
+        self.__target_url = urljoin(webdav_url, targetPath + '/')
+        self.__extensions = [e for f in shutil.get_unpack_formats() for e in f[1]]
 
     def onNewFile(self, path):
-        if path.endswith(".zip"):
-            print("Extracting files from zip archive: %s" % path)
+        extension = os.path.splitext(path)[1]
+
+        if extension in self.__extensions:
+            print("Extracting files from archive: %s" % path)
             thread = Thread(target = self.extract, args = (path,))
             thread.start()
             self.__threads.append(thread)
 
+
     def extract(self, path):
+        basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
+        (name,extension) = os.path.splitext(basename)
+        localname = 'archive' + extension
+        upload_base_url = urljoin(self.__target_url, name + '/');
+
         with tempfile.TemporaryDirectory() as tmpdirname:
-            local_archive = os.path.join(tmpdirname, 'archive.zip')
+            local_archive = os.path.join(tmpdirname, localname)
 
             url = urljoin(self.__download_url, path)
             print("Downloading %s into %s" % (url, local_archive))
@@ -164,16 +178,12 @@ class UnarchiveActivity(TransferringActivity):
             open(local_archive, 'wb').write(r.content)
 
             target_dir = os.path.join(tmpdirname, 'contents')
-            with zipfile.ZipFile(local_archive, "r") as zip_ref:
-                zip_ref.extractall(target_dir)
-
-            basename = os.path.basename(path) # REVISIT: shouldn't this be OS indepndent?
-            target = urljoin(self.__target_url, os.path.splitext(basename)[0] + '/');
+            shutil.unpack_archive(local_archive, target_dir)
 
             for r, d, f in os.walk(target_dir):
                 for file in f:
                     abs_path = os.path.join(r, file)
-                    upload_url = urljoin(target, file)
+                    upload_url = urljoin(upload_base_url, file)
 
                     print("    UPLOADING %s to %s" % (abs_path, upload_url))
                     with open(abs_path, 'rb') as data:

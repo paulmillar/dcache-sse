@@ -29,46 +29,51 @@ parser.add_argument('paths', metavar='PATH', nargs='+',
 parser.add_argument('--activity', metavar="ACTIVITY", choices=['print', 'unarchive'], default="print",
                     help='What to do with the inotify events.')
 parser.add_argument('--target-path', metavar="PATH", default=None, help="The path for unarchive activity");
-args = parser.parse_args()
+args = vars(parser.parse_args())
 
-auth = vars(args).get("auth")
-user = vars(args).get("user")
-pw = vars(args).get("password")
-isRecursive = vars(args).get("recursive") == 'recursive'
+auth = args["auth"]
+user = args["user"]
+pw = args["password"]
+isRecursive = args["recursive"] == 'recursive'
 if auth == 'userpw' and not pw:
     pw = getpass.getpass("Please enter dCache password for user " + user + ": ")
+    args["password"] = pw
 
-def configure_session():
+def configure_session(args):
     s = requests.Session()
+
+    auth = args.get("auth")
     if auth == 'userpw':
-        s.auth = (user,pw)
+        s.auth = (args.get("user"),args.get("password"))
     else:
         s.cert = '/tmp/x509up_u1000' # REVISIT support X509_PROXY environment var, and discover uid.
 
-    trust = vars(args).get("x509-trust")
+    trust = args["x509_trust"]
     if trust == 'any':
         print("Disabling certificate verification: connection is insecure!")
         s.verify = False
         urllib3.disable_warnings()
     elif trust == 'path':
-        s.verify = vars(args).get("x509-trust-path")
+        s.verify = args.get("x509-trust-path")
+    elif trust != 'builtin':
+        raise Exception('Unknown trust value: ' + str(trust))
     return s
 
 def request_channel(session):
-    response = session.post(vars(args).get("endpoint") + '/events/channels')
+    response = session.post(args["endpoint"] + '/events/channels')
     response.raise_for_status()
     return response.headers['Location']
 
 eventCount = 0
-activity_name = vars(args).get("activity")
+activity_name = args.get("activity")
 
 if activity_name == 'print':
     activity = activities.PrintActivity()
 elif activity_name == 'unarchive':
-    target = vars(args).get("target_path")
+    target = args.get("target_path")
     if not target:
         raise Exception('Missing --target-path argument')
-    activity = activities.UnarchiveActivity(target, session_factory=configure_session, api_url=vars(args).get("endpoint"))
+    activity = activities.UnarchiveActivity(target, args=args, session_factory=configure_session, api_url=args["endpoint"])
 else:
     raise Exception('Unknown activity: ' + activity)
 
@@ -88,8 +93,9 @@ def single_watch(path):
     try:
         watch(path)
     except requests.exceptions.HTTPError as e:
-        if w.status_code == 400:
-            print("Watch for path %s request failed: %s" % (path, w.json()["errors"][0]["message"]))
+        r = e.response
+        if r.status_code == 400:
+            print("Watch for path %s request failed: %s" % (path, r.json()["errors"][0]["message"]))
         else:
             print("Server rejected watch for path %s: %s" % (path, str(e)))
 
@@ -99,7 +105,7 @@ def single_watch(path):
 
 def watch_subdirectories(path):
     try:
-        r = s.get(vars(args).get("endpoint") + "/namespace" + path + "?children=true")
+        r = s.get(args["endpoint"] + "/namespace" + path + "?children=true")
         r.raise_for_status()
         dir_list = r.json()
         children = dir_list["children"]
@@ -109,8 +115,9 @@ def watch_subdirectories(path):
                 recursive_watch(path + "/" + item["fileName"])
 
     except requests.exceptions.HTTPError as e:
-        if w.status_code == 400:
-            print("Directory listing for path %s failed: %s" % (path, w.json()["errors"][0]["message"]))
+        r = e.response
+        if r.status_code == 400:
+            print("Directory listing for path %s failed: %s" % (path, r.json()["errors"][0]["message"]))
         else:
             print("Server rejected directory listing for path %s: %s" % (path, str(e)))
 
@@ -124,8 +131,9 @@ def recursive_watch(path):
         watch_subdirectories(path)
 
     except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 400:
-            print("Watch for path %s request failed: %s" % (path, e.response.json()["errors"][0]["message"]))
+        r = e.response
+        if r.status_code == 400:
+            print("Watch for path %s request failed: %s" % (path, r.json()["errors"][0]["message"]))
         else:
             print("Server rejected watch for path %s: %s" % (path, str(e)))
 
@@ -241,11 +249,11 @@ def remove_redundant_paths(paths):
             watches.remove(watch)
     return watches
 
-s = configure_session()
+s = configure_session(args)
 channel = request_channel(s)
 
 try:
-    base_paths = vars(args).get("paths")
+    base_paths = args["paths"]
     if isRecursive:
         paths = remove_redundant_paths(base_paths)
         for path in paths:
