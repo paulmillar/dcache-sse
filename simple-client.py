@@ -104,6 +104,7 @@ def single_watch(path):
 
 
 def watch_subdirectories(path):
+    "Recursively watch all subdirectories of the given path"
     try:
         r = s.get(args["endpoint"] + "/namespace" + path + "?children=true")
         r.raise_for_status()
@@ -126,6 +127,7 @@ def watch_subdirectories(path):
 
 
 def recursive_watch(path):
+    "Watch path and any subdirectories, recursively"
     try:
         watch(path)
         watch_subdirectories(path)
@@ -154,6 +156,7 @@ def checkMoveEvents():
             activity.onDeletedFile(path)
         else:
             activity.onNewFile(path)
+
 
 def inotify(type, sub, event):
     mask = event['mask']
@@ -227,39 +230,40 @@ def inotify(type, sub, event):
 mvCookie = {}
 watches = {}
 
+
 def normalise_path(path):
+    "Strip off any trailing '/' in any non-root path"
     return path if path == "/" or not path.endswith("/") else path[:-1]
 
+
 def remove_redundant_paths(paths):
-    "Removing any paths that are redundant"
-    watches = []
-    for raw_path in paths:
-        path = normalise_path(raw_path)
-        remove_watches = []
-        for watch in watches:
-            if path.startswith(watch + "/"):
+    "Return a list of paths where any subdirectories have been removed"
+    non_redundant_paths = []
+    for path in paths:
+        paths_to_remove = []
+        for non_redundant_path in non_redundant_paths:
+            if path.startswith(non_redundant_path + "/"):
                 print("Skipping redundant path: %s" % path)
                 break
-            elif watch.startswith(path + "/"):
-                print("Skipping redundant path: %s" % watch)
-                remove_watches.append(watch)
+            elif non_redundant_path.startswith(path + "/"):
+                print("Skipping redundant path: %s" % non_redundant_path)
+                paths_to_remove.append(non_redundant_path)
         else:
-            watches.append(path)
-        for watch in remove_watches:
-            watches.remove(watch)
-    return watches
+            non_redundant_paths.append(path)
+        for remove_path in paths_to_remove:
+            non_redundant_paths.remove(remove_path)
+    return non_redundant_paths
 
 s = configure_session(args)
 channel = request_channel(s)
 
 try:
-    base_paths = args["paths"]
+    paths = map(normalise_path, args["paths"])
     if isRecursive:
-        paths = remove_redundant_paths(base_paths)
+        paths = remove_redundant_paths(paths)
         for path in paths:
             recursive_watch(path)
     else:
-        paths = map(normalise_path, base_paths)
         for path in paths:
             single_watch(path)
 

@@ -8,7 +8,7 @@ import zipfile
 import shutil
 
 class BaseActivity:
-    """The base class that does nothing when presented with events"""
+    """The base class that does nothing when presented with events."""
 
     def onNewFile(self, path):
         pass
@@ -31,8 +31,9 @@ class BaseActivity:
     def close(self):
         pass
 
+
 class HttpBasedActivity(BaseActivity):
-    """Any activity that makes use of Requests library."""
+    """Any activity that makes use of python's Requests library."""
     def __init__(self, *args, **kwargs):
         if kwargs is None:
             raise Exception('Missing kwargs in HttpBasedActivity')
@@ -59,7 +60,7 @@ class HttpBasedActivity(BaseActivity):
 
 
 class FrontendBasedActivity(HttpBasedActivity):
-    """Any activity that makes use of dCache REST API."""
+    """Any activity that makes use of dCache's REST API."""
     def __init__(self, *args, **kwargs):
         super(FrontendBasedActivity, self).__init__(*args, **kwargs)
 
@@ -79,7 +80,11 @@ class FrontendBasedActivity(HttpBasedActivity):
 
 
 class TransferringActivity(FrontendBasedActivity):
-    """Any activity that transfers data between the client and dCache."""
+    """
+    Any activity that transfers data between the client and dCache.  This
+    is based on FrontendBasedActivity as the client must discover which
+    doors are available.
+    """
     def __init__(self, *args, **kwargs):
         super(TransferringActivity, self).__init__(*args, **kwargs)
         self.__doors = None
@@ -94,7 +99,7 @@ class TransferringActivity(FrontendBasedActivity):
 
     def doors(self, protocol, tags):
         """Return the URL of a door with this protocol"""
-        ## REVISIT: cached value expires after some time?
+        ## REVISIT: should cached value expires after some time?
         if not self.__doors:
             self.__doors = self.__discoverDoors()
 
@@ -121,6 +126,7 @@ class TransferringActivity(FrontendBasedActivity):
 
 
 class PrintActivity(BaseActivity):
+    "Simple activity that prints information about events."
     def onNewFile(self, path):
         print("NEW FILE %s" % path)
 
@@ -141,7 +147,7 @@ class PrintActivity(BaseActivity):
 
 
 class UnarchiveActivity(TransferringActivity):
-    """Extract newly uploaded files to a target directory"""
+    """Extract newly uploaded archive files to a target directory"""
 
     def __init__(self, *args, **kwargs):
         super(UnarchiveActivity, self).__init__(*args, **kwargs)
@@ -152,6 +158,7 @@ class UnarchiveActivity(TransferringActivity):
         self.__download_url = webdav_url
         self.__target_url = urljoin(webdav_url, targetPath + '/')
         self.__extensions = [e for f in shutil.get_unpack_formats() for e in f[1]]
+
 
     def onNewFile(self, path):
         for extension in self.__extensions:
@@ -164,7 +171,7 @@ class UnarchiveActivity(TransferringActivity):
 
 
     def extract(self, path, extension):
-        name = os.path.basename(path)[:-len(extension)] # REVISIT: shouldn't this be OS indepndent?
+        name = os.path.basename(path)[:-len(extension)] # REVISIT: shouldn't this be OS independent?
         localname = 'archive' + extension
         upload_base_url = urljoin(self.__target_url, name + '/');
 
