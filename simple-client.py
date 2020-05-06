@@ -7,15 +7,37 @@ import getpass
 import argparse
 import json
 import activities
+import liboidcagent as oidc
+
+##
+##  This util needs liboidcagent, which may be installed via
+##
+##      pip install liboidcagent
+##
+##  or
+##
+##      pip3 install liboidcagent
+##
+
+class OidcAuth(requests.auth.AuthBase):
+    """Support for authenticating with OIDC access token"""
+    def __init__(self, account):
+        self.account = account
+
+    def __call__(self, r):
+        token = oidc.get_access_token(self.account)
+        r.headers.update({'Authorization': "Bearer %s" % (token)})
+        return r
 
 parser = argparse.ArgumentParser(description='Sample dCache SSE consumer')
 parser.add_argument('--endpoint',
                     default="https://prometheus.desy.de:3880/api/v1",
                     help="The events endpoint.  This should be a URL like 'https://frontend.example.org:3880/api/v1'.")
-parser.add_argument('--auth', metavar="METHOD", choices=['userpw', 'x509'], default="userpw",
+parser.add_argument('--auth', metavar="METHOD", choices=['userpw', 'x509', 'oidc'], default="userpw",
                     help="How to authenticate.")
 parser.add_argument('--user', metavar="NAME", default=getpass.getuser(),
                     help="The dCache username.  Defaults to the current user's name.")
+parser.add_argument('--oidc-account', metavar="NAME", help="The oidc-agent account name")
 parser.add_argument('--recursive', '-r', action='store_const', const='recursive', default='single')
 parser.add_argument('--password', default=None,
                     help="The dCache password.  Defaults to prompting the user.")
@@ -34,10 +56,13 @@ args = vars(parser.parse_args())
 auth = args["auth"]
 user = args["user"]
 pw = args["password"]
+oidc_account = args["oidc_account"]
 isRecursive = args["recursive"] == 'recursive'
 if auth == 'userpw' and not pw:
     pw = getpass.getpass("Please enter dCache password for user " + user + ": ")
     args["password"] = pw
+if auth == 'oidc' and not oidc_account:
+    raise Exception('Missing oidc-agent account name.  Please specify --oidc-account')
 
 def configure_session(args):
     s = requests.Session()
@@ -45,6 +70,8 @@ def configure_session(args):
     auth = args.get("auth")
     if auth == 'userpw':
         s.auth = (args.get("user"),args.get("password"))
+    elif auth == 'oidc':
+        s.auth = OidcAuth(oidc_account)
     else:
         s.cert = '/tmp/x509up_u1000' # REVISIT support X509_PROXY environment var, and discover uid.
 
