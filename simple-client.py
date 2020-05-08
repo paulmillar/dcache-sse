@@ -8,6 +8,7 @@ import argparse
 import json
 import activities
 import liboidcagent as oidc
+import os
 
 ##
 ##  This util needs liboidcagent, which may be installed via
@@ -46,6 +47,9 @@ parser.add_argument('--x509-trust', choices=['path', 'builtin', 'any'],
                     default='builtin')
 parser.add_argument('--x509-trust-path', metavar="PATH", default='/etc/grid-security/certificates',
                     help="Trust anchor location if --x509-trust is 'path'.")
+parser.add_argument('--x509-proxy', metavar="PATH", dest='proxy',
+                    default=os.environ.get('X509_USER_PROXY', '/tmp/x509up_u' + str(os.getuid())),
+                    help='Client X509 proxy file.')
 parser.add_argument('paths', metavar='PATH', nargs='+',
                     help='The paths to watch.')
 parser.add_argument('--activity', metavar="ACTIVITY", choices=['print', 'unarchive'], default="print",
@@ -73,7 +77,7 @@ def configure_session(args):
     elif auth == 'oidc':
         s.auth = OidcAuth(oidc_account)
     else:
-        s.cert = '/tmp/x509up_u1000' # REVISIT support X509_PROXY environment var, and discover uid.
+        s.cert = args.get("proxy")
 
     trust = args["x509_trust"]
     if trust == 'any':
