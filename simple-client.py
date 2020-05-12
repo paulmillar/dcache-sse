@@ -31,6 +31,8 @@ class OidcAuth(requests.auth.AuthBase):
         return r
 
 parser = argparse.ArgumentParser(description='Sample dCache SSE consumer')
+parser.add_argument('--state', metavar="PATH",
+                    help='Path of a file in which information is stored to avoid loosing events.')
 parser.add_argument('--endpoint',
                     default="https://prometheus.desy.de:3880/api/v1",
                     help="The events endpoint.  This should be a URL like 'https://frontend.example.org:3880/api/v1'.")
@@ -58,6 +60,7 @@ parser.add_argument('--target-path', metavar="PATH", default=None, help="The pat
 parser.add_argument('--execute-command', metavar="CMD", default=None, help="Command to execute");
 args = vars(parser.parse_args())
 
+state_path = args["state"]
 auth = args["auth"]
 user = args["user"]
 pw = args["password"]
@@ -92,6 +95,7 @@ def configure_session(args):
     return s
 
 def request_channel(session):
+    print("Creating a new channel")
     response = session.post(args["endpoint"] + '/events/channels')
     response.raise_for_status()
     return response.headers['Location']
@@ -114,7 +118,7 @@ elif activity_name == 'execute':
 else:
     raise Exception('Unknown activity: ' + activity)
 
-def watch(path):
+def watch(channel, path):
     "Add a watch and update watches list if successful"
     w = s.post(format(channel) + "/subscriptions/inotify",
                json={"path": path, "flags": ["IN_CLOSE_WRITE", "IN_CREATE",
@@ -126,10 +130,10 @@ def watch(path):
     print("Watching %s" % path)
     watches[watch] = path
 
-def single_watch(path):
+def single_watch(channel, path):
     "Watch a single path (i.e., non-recursive)"
     try:
-        watch(path)
+        watch(channel, path)
     except requests.exceptions.HTTPError as e:
         r = e.response
         if r.status_code == 400:
@@ -151,7 +155,7 @@ def watch_subdirectories(path):
 
         for item in children:
             if item["fileType"] == "DIR":
-                recursive_watch(path + "/" + item["fileName"])
+                recursive_watch(channel, path + "/" + item["fileName"])
 
     except requests.exceptions.HTTPError as e:
         r = e.response
@@ -164,10 +168,10 @@ def watch_subdirectories(path):
         print("Failed to list directory %s: %s" % (path, str(e)))
 
 
-def recursive_watch(path):
+def recursive_watch(channel, path):
     "Watch path and any subdirectories, recursively"
     try:
-        watch(path)
+        watch(channel, path)
         watch_subdirectories(path)
 
     except requests.exceptions.HTTPError as e:
@@ -214,7 +218,7 @@ def inotify(type, sub, event):
             action = flag
 
     if action == 'IN_CREATE' and isDir and isRecursive:
-        single_watch(path)
+        single_watch(channel, path)
 
     if action == 'IN_IGNORED' and isDir:
         watches.pop(path)
@@ -296,46 +300,106 @@ def remove_redundant_paths(paths):
             non_redundant_paths.remove(remove_path)
     return non_redundant_paths
 
-s = configure_session(args)
-channel = request_channel(s)
 
-try:
+def create_channel_and_watches(s):
+    "Create a channel and include all watches"
+    channel = request_channel(s)
+
     paths = map(normalise_path, args["paths"])
     if isRecursive:
         paths = remove_redundant_paths(paths)
         for path in paths:
-            recursive_watch(path)
+            recursive_watch(channel, path)
     else:
         for path in paths:
-            single_watch(path)
+            single_watch(channel, path)
 
     if not watches:
         exit("No watches established, exiting...")
 
-    messages = SSEClient(channel, session=s)
+    return channel
 
-    for msg in messages:
-        eventCount = eventCount + 1
-        eventType = msg.event
-        data = json.loads(msg.data)
-        if eventType == "SYSTEM":
-            type = data["type"]
-            if type != "NEW_SUBSCRIPTION" and type != "SUBSCRIPTION_CLOSED":
-                print("SYSTEM: %s" % msg.data)
-        else:
-            sub = data["subscription"]
-            event = data["event"]
-            if eventType == 'inotify':
-                inotify(eventType, sub, event)
+
+def restore_channel_and_watches(path):
+    try:
+        with open(path) as f:
+            is_first = True
+            for line in f.readlines():
+                if is_first:
+                    (channel,last_id) = line.split()
+                    print("Restoring channel")
+                    is_first = False
+                else:
+                    (watch,encoded_path) = line.split()
+                    path = requests.utils.unquote(encoded_path)
+                    print("Restoring watch %s" % path)
+                    watches[watch] = path
+
+    except FileNotFoundError:
+        channel = create_channel_and_watches(s)
+        last_id = None
+
+    return (channel,last_id)
+
+s = configure_session(args)
+
+if state_path:
+    (channel,last_id) = restore_channel_and_watches(state_path)
+else:
+    channel = create_channel_and_watches(s)
+    last_id = None
+
+try:
+    while True:
+        try:
+            if last_id:
+                messages = SSEClient(channel, session=s, last_id=last_id)
             else:
-                print("Unknown event: %s", type)
-                print("    Subscription: %s", sub)
-                print("    Data: %s", event)
+                messages = SSEClient(channel, session=s)
+
+            for msg in messages:
+                eventCount = eventCount + 1
+                eventType = msg.event
+                data = json.loads(msg.data)
+                if eventType == "SYSTEM":
+                    type = data["type"]
+                    if type != "NEW_SUBSCRIPTION" and type != "SUBSCRIPTION_CLOSED":
+                        print("SYSTEM: %s" % msg.data)
+                else:
+                    sub = data["subscription"]
+                    event = data["event"]
+                    if eventType == 'inotify':
+                        inotify(eventType, sub, event)
+                    else:
+                        print("Unknown event: %s", type)
+                        print("    Subscription: %s", sub)
+                        print("    Data: %s", event)
+
+                if msg.id:
+                    last_id = msg.id
+
+        except requests.exceptions.HTTPError as e:
+            r = e.response
+            if r.status_code == 404:
+                print("Recovering from unknown channel")
+                channel = create_channel_and_watches(s)
+                last_id = None
+            else:
+                print("HTTP error {} {}".format(r.status_code, r.reason))
+                break
 
 except KeyboardInterrupt:
     print("Interrupting...")
 
 finally:
-    print("Deleting channel")
-    s.delete(channel)
+    if state_path != None and last_id != None:
+        print("Saving state for resumption")
+        with open(state_path, 'w') as f:
+            f.write("{} {}\n".format(channel, last_id))
+            for watch,path in watches.items():
+                f.write("{} {}\n".format(watch, requests.utils.quote(path)))
+    else:
+        print("Deleting channel")
+        s.delete(channel)
+        os.remove(state_path)
     activity.close()
