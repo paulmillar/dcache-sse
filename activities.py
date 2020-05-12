@@ -35,6 +35,9 @@ class BaseActivity:
     def onMovedDirectory(self, fromPath, toPath):
         pass
 
+    def onEventLoss(self):
+        pass
+
     def close(self):
         pass
 
@@ -157,6 +160,9 @@ class PrintActivity(BaseActivity):
 
     def onMovedDirectory(self, fromPath, toPath):
         print("DIRECTORY MOVED FROM %s/ TO %s/" % (fromPath, toPath))
+
+    def onEventLoss(self):
+        print("EVENT LOSS")
 
 
 class UnarchiveActivity(TransferringActivity):

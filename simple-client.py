@@ -363,7 +363,9 @@ try:
                 data = json.loads(msg.data)
                 if eventType == "SYSTEM":
                     type = data["type"]
-                    if type != "NEW_SUBSCRIPTION" and type != "SUBSCRIPTION_CLOSED":
+                    if type == "EVENT_LOSS":
+                        activity.onEventLoss()
+                    elif type != "NEW_SUBSCRIPTION" and type != "SUBSCRIPTION_CLOSED":
                         print("SYSTEM: %s" % msg.data)
                 else:
                     sub = data["subscription"]
