@@ -52,9 +52,10 @@ parser.add_argument('--x509-proxy', metavar="PATH", dest='proxy',
                     help='Client X509 proxy file.')
 parser.add_argument('paths', metavar='PATH', nargs='+',
                     help='The paths to watch.')
-parser.add_argument('--activity', metavar="ACTIVITY", choices=['print', 'unarchive'], default="print",
+parser.add_argument('--activity', metavar="ACTIVITY", choices=['print', 'unarchive', 'execute'], default="print",
                     help='What to do with the inotify events.')
 parser.add_argument('--target-path', metavar="PATH", default=None, help="The path for unarchive activity");
+parser.add_argument('--execute-command', metavar="CMD", default=None, help="Command to execute");
 args = vars(parser.parse_args())
 
 auth = args["auth"]
@@ -105,6 +106,11 @@ elif activity_name == 'unarchive':
     if not target:
         raise Exception('Missing --target-path argument')
     activity = activities.UnarchiveActivity(target, args=args, session_factory=configure_session, api_url=args["endpoint"])
+elif activity_name == 'execute':
+    cmd = args.get("execute_command")
+    if not cmd:
+        raise Exception('Missing --execute-command argument')
+    activity = activities.ExecuteActivity(cmd)
 else:
     raise Exception('Unknown activity: ' + activity)
 

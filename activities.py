@@ -6,6 +6,7 @@ import requests
 import time
 import zipfile
 import shutil
+import subprocess
 
 class BaseActivity:
     """The base class that does nothing when presented with events."""
@@ -205,3 +206,45 @@ class UnarchiveActivity(TransferringActivity):
                     isFirst = False
                 thread.join()
         super(UnarchiveActivity, self).close()
+
+
+class ExecuteActivity(BaseActivity):
+    """Run arbitrary command on events"""
+
+    def __init__(self, *args, **kwargs):
+        self.command = args[0]
+        self.__invocations = []
+
+    def onNewFile(self, path):
+        self._runCommand("NEW_FILE", path)
+
+    def onDeletedFile(self, path):
+        self._runCommand("DELETED_FILE", path)
+
+    def onMovedFile(self, fromPath, toPath):
+        self._runCommand("MOVED_FILE", fromPath, toPath)
+
+    def onNewDirectory(self, path):
+        self._runCommand("NEW_DIR", path)
+
+    def onDeletedDirectory(self, path):
+        self._runCommand("DELETED_DIR", path)
+
+    def onMovedDirectory(self, fromPath, toPath):
+        self._runCommand("MOVED_DIR", fromPath, toPath)
+
+    def _runCommand(self, operation, path, targetPath=None):
+        if targetPath:
+            invocation = subprocess.Popen([self.command, operation, path, targetPath])
+        else:
+            invocation = subprocess.Popen([self.command, operation, path])
+        self.__invocations.append(invocation)
+
+    def close(self):
+        isFirst = True
+        for invocation in self.__invocations:
+            if invocation.poll() == None:
+                if isFirst:
+                    print("Waiting for command to finish")
+                    isFirst = False
+                thread.wait() # REVISIT add timeout?
