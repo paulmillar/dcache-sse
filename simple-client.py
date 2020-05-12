@@ -401,5 +401,8 @@ finally:
     else:
         print("Deleting channel")
         s.delete(channel)
-        os.remove(state_path)
+        try:
+            os.remove(state_path)
+        except FileNotFoundError:
+            pass
     activity.close()
