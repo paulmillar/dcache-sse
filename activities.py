@@ -17,6 +17,9 @@ class BaseActivity:
     def onDeletedFile(self, path):
         pass
 
+    def onFileMetadataChanged(self, path):
+        pass
+
     def onMovedFile(self, fromPath, toPath):
         pass
 
@@ -24,6 +27,9 @@ class BaseActivity:
         pass
 
     def onDeletedDirectory(self, path):
+        pass
+
+    def onDirMetadataChanged(self, path):
         pass
 
     def onMovedDirectory(self, fromPath, toPath):
@@ -134,6 +140,9 @@ class PrintActivity(BaseActivity):
     def onDeletedFile(self, path):
         print("DELETED FILE %s" % path)
 
+    def onFileMetadataChanged(self, path):
+        print("FILE METADATA CHANGED %s" % path)
+
     def onMovedFile(self, fromPath, toPath):
         print("FILE MOVED FROM %s TO %s" % (fromPath, toPath))
 
@@ -142,6 +151,9 @@ class PrintActivity(BaseActivity):
 
     def onDeletedDirectory(self, path):
         print("DELETED DIRECTORY %s/" % path)
+
+    def onDirMetadataChanged(self, path):
+        print("DIRECTORY METADATA CHANGED %s" % path)
 
     def onMovedDirectory(self, fromPath, toPath):
         print("DIRECTORY MOVED FROM %s/ TO %s/" % (fromPath, toPath))
@@ -221,6 +233,9 @@ class ExecuteActivity(BaseActivity):
     def onDeletedFile(self, path):
         self._runCommand("DELETED_FILE", path)
 
+    def onFileMetadataChanged(self, path):
+        self._runCommand("FILE_METADATA_CHANGED", path)
+
     def onMovedFile(self, fromPath, toPath):
         self._runCommand("MOVED_FILE", fromPath, toPath)
 
@@ -229,6 +244,9 @@ class ExecuteActivity(BaseActivity):
 
     def onDeletedDirectory(self, path):
         self._runCommand("DELETED_DIR", path)
+
+    def onDirMetadataChanged(self, path):
+        self._runCommand("DIR_METADATA_CHANGED", path)
 
     def onMovedDirectory(self, fromPath, toPath):
         self._runCommand("MOVED_DIR", fromPath, toPath)

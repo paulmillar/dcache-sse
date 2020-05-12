@@ -119,7 +119,8 @@ def watch(path):
     w = s.post(format(channel) + "/subscriptions/inotify",
                json={"path": path, "flags": ["IN_CLOSE_WRITE", "IN_CREATE",
                                              "IN_DELETE", "IN_DELETE_SELF",
-                                             "IN_MOVE_SELF", "IN_MOVE"]})
+                                             "IN_MOVE_SELF", "IN_MOVE",
+                                             "IN_ATTRIB"]})
     w.raise_for_status()
     watch = w.headers['Location']
     print("Watching %s" % path)
@@ -250,6 +251,8 @@ def inotify(type, sub, event):
                 activity.onNewDirectory(path)
             elif action == 'IN_DELETE':
                 activity.onDeletedDirectory(path)
+            elif action == 'IN_ATTRIB':
+                activity.onDirMetadataChanged(path)
             elif action == 'IN_IGNORED' or action == 'IN_DELETE_SELF' or action == 'IN_MOVE_SELF':
                 pass
             else:
@@ -259,6 +262,8 @@ def inotify(type, sub, event):
                 activity.onNewFile(path)
             elif action == 'IN_DELETE':
                 activity.onDeletedFile(path)
+            elif action == 'IN_ATTRIB':
+                activity.onFileMetadataChanged(path)
             elif action == 'IN_IGNORED' or action == 'IN_DELETE_SELF' or action == 'IN_CREATE':
                 pass
             else:
